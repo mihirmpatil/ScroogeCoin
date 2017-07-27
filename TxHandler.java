@@ -1,4 +1,6 @@
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Set;
 
 public class TxHandler {
 
@@ -24,22 +26,55 @@ public class TxHandler {
     public boolean isValidTx(Transaction tx) {
         // IMPLEMENT THIS
     	boolean result = true;
+    	double opSum = 0;
+    	double ipSum = 0;
     	ArrayList<Transaction.Output> outputs = tx.getOutputs();
     	for (Transaction.Output op : outputs) {
-    		;
+    		// condition 4
+    		if (op.value < 0) {
+    			return false;
+    		}
+    		opSum += op.value;
     	}
     	
+    	Set<UTXO> seenUTXOs = new HashSet<UTXO>();
     	ArrayList<Transaction.Input> inputs = tx.getInputs();
     	for (int i = 0; i < tx.numInputs(); i++) {
-    		Transaction.Input curr = tx.getInput(i);
-    		result = Crypto.verifySignature(tx.getOutput(curr.outputIndex).address, tx.getRawDataToSign(i), curr.signature);
+    		Transaction.Input currIn = tx.getInput(i);
+    		UTXO currUTXO = new UTXO(currIn.prevTxHash, currIn.outputIndex);
+    		
+    		// condition 1
+    		if (pool.contains(currUTXO) == false) {
+    			return false;
+    		}
+            Transaction.Output output = pool.getTxOutput(currUTXO);
+    		
+            // condition 2
+            result = Crypto.verifySignature(output.address, tx.getRawDataToSign(i), currIn.signature);
     		if (result == false) {
     			return false;
     		}
+    		
+    		// condition 3
+    		if (seenUTXOs.contains(currUTXO)) {
+    			return false;
+    		} else {
+    			seenUTXOs.add(currUTXO);
+    		}
+    		
+    		if (output.value < 0) {
+    			return false;
+    		}
+    		ipSum += output.value;
     	}
     	
+    	// condition 5
+    	if (ipSum < opSum) {
+    		return false;
+    	}
     	
     	return true;
+    	
     }
 
     /**
@@ -49,7 +84,27 @@ public class TxHandler {
      */
     public Transaction[] handleTxs(Transaction[] possibleTxs) {
         // IMPLEMENT THIS
-    	return possibleTxs;
+    	Set<Transaction> txns = new HashSet<Transaction>();
+    	
+    	for (Transaction tx : possibleTxs) {
+    		if (isValidTx(tx)) {
+    			txns.add(tx);
+    			// remove inputs from utxo pool
+    			for (int i = 0; i < tx.numInputs(); i++) {
+    	    		Transaction.Input currIn = tx.getInput(i);
+    	    		UTXO currUTXO = new UTXO(currIn.prevTxHash, currIn.outputIndex);
+    	    		pool.removeUTXO(currUTXO);
+    			}
+    			// add unspent outputs to utxo pool
+    			for (int i = 0; i < tx.numOutputs(); i++) {
+    				Transaction.Output currOut = tx.getOutput(i);
+    				UTXO currUTXO = new UTXO(tx.getHash(), i);
+    				pool.addUTXO(currUTXO, currOut);
+    			}
+    		}
+    	}
+    	
+    	return txns.toArray(new Transaction[txns.size()]);
     }
 
 }
